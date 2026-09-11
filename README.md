@@ -74,7 +74,7 @@ Omarchy installation: `omarchy`, `omarchy-shell`, `hyprctl`, `wl-paste`, and
 - The **Share** action uses LocalSend through `omarchy share clipboard`.
 - Screenshot and extraction actions use Omarchy's existing capture commands.
 - The plugin installs no packages, services, hooks, or privileged policies.
-- It does not use `sudo` or `pkexec` and does not overwrite user configuration.
+- It requests no elevated permissions and does not overwrite user configuration.
 - Network access occurs only when the user explicitly chooses **Share**.
 
 ## Remove
