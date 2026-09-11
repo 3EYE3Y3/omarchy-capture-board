@@ -1,0 +1,49 @@
+#!/bin/bash
+#
+# Prints the current clipboard's plain-text content to stdout, for the
+# Convert capability to analyze locally. Read-only: unlike
+# capture-board-paste-text, this never types into the focused window, so it
+# does not need that helper's stdin-descriptor/argv protections — it only
+# ever produces output, never consumes untrusted input as a command.
+#
+# Silent no-op (exit 0, empty stdout) whenever there is nothing usable to
+# read, so a missing tool or an empty/non-text clipboard never surfaces as
+# an error in the panel.
+
+set -u
+
+readonly WL_PASTE=/usr/bin/wl-paste
+readonly MAX_BYTES=8192
+
+[[ -x $WL_PASTE ]] || exit 0
+
+select_text_mime() {
+  local offered_type types_fd types_pid list_status selected_type='' saw_type=false
+
+  exec {types_fd}< <("$WL_PASTE" --list-types 2>/dev/null)
+  types_pid=$!
+
+  while IFS= read -r offered_type <&"$types_fd"; do
+    saw_type=true
+    case "${offered_type,,}" in
+      text/plain\;charset=utf-8|text/plain\;charset=utf8|text/plain|utf8_string)
+        [[ -n $selected_type ]] || selected_type=$offered_type
+        ;;
+    esac
+  done
+
+  exec {types_fd}<&-
+  wait "$types_pid"
+  list_status=$?
+  if (( list_status != 0 )) && [[ $saw_type == false ]]; then
+    return 3
+  fi
+  (( list_status == 0 )) || return 2
+  [[ -n $selected_type ]] || return 1
+  printf '%s\n' "$selected_type"
+}
+
+clipboard_type=$(select_text_mime) || exit 0
+
+"$WL_PASTE" --no-newline --type "$clipboard_type" 2>/dev/null | /usr/bin/head -c "$MAX_BYTES"
+exit 0

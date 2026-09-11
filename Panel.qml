@@ -18,7 +18,15 @@ Panel {
     .toString().replace(/^file:\/\//, "")
 
   onOpenedChanged: {
-    if (!opened) moreActionsVisible = false
+    if (!opened) {
+      moreActionsVisible = false
+    } else {
+      convert.refresh()
+    }
+  }
+
+  ConversionService {
+    id: convert
   }
 
   function launch(action) {
@@ -83,6 +91,29 @@ Panel {
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
               font.pixelSize: Style.font.caption
             }
+          }
+        }
+
+        Rectangle {
+          Layout.fillWidth: true
+          visible: convert.result !== null
+          implicitHeight: convertCard.implicitHeight + Style.space(20)
+          radius: Math.max(Style.space(5), Style.cornerRadius)
+          color: Style.normalFillFor(root.barForeground, Color.accent, Color.urgent)
+          border.width: Style.normalBorderWidth
+          border.color: Style.normalBorderFor(root.barForeground, Color.accent, Color.urgent)
+
+          ConvertCard {
+            id: convertCard
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.leftMargin: Style.space(12)
+            anchors.rightMargin: Style.space(12)
+            result: convert.result
+            copyConfirmed: convert.copyConfirmed
+            foreground: root.barForeground
+            onCopyRequested: function(text) { convert.copyResult(text) }
           }
         }
 
@@ -305,6 +336,72 @@ Panel {
                 onTriggered: root.launch(modelData.action)
               }
             }
+          }
+
+          Text {
+            text: "CONVERT PREFERENCES"
+            color: root.barForeground
+            opacity: 0.58
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+            font.letterSpacing: 1.2
+            font.bold: true
+          }
+
+          PreferenceChipRow {
+            label: "MEASUREMENT SYSTEM"
+            foreground: root.barForeground
+            value: convert.preferences.measurementSystem
+            options: [{ value: "metric", label: "Metric" }, { value: "imperial", label: "Imperial" }]
+            onSelected: function(v) { convert.setPreference("measurementSystem", v) }
+          }
+
+          PreferenceChipRow {
+            label: "TEMPERATURE"
+            foreground: root.barForeground
+            value: convert.preferences.temperatureUnit
+            options: [{ value: "c", label: "°C" }, { value: "f", label: "°F" }]
+            onSelected: function(v) { convert.setPreference("temperatureUnit", v) }
+          }
+
+          PreferenceChipRow {
+            label: "CURRENCY"
+            foreground: root.barForeground
+            value: convert.preferences.currency
+            options: [
+              { value: "USD", label: "USD" }, { value: "EUR", label: "EUR" }, { value: "GBP", label: "GBP" },
+              { value: "AUD", label: "AUD" }, { value: "CAD", label: "CAD" }, { value: "NZD", label: "NZD" },
+              { value: "JPY", label: "JPY" }, { value: "CNY", label: "CNY" }, { value: "INR", label: "INR" },
+              { value: "CHF", label: "CHF" }, { value: "SGD", label: "SGD" }, { value: "HKD", label: "HKD" }
+            ]
+            onSelected: function(v) { convert.setPreference("currency", v) }
+          }
+
+          PreferenceChipRow {
+            label: "FUEL ECONOMY"
+            foreground: root.barForeground
+            value: convert.preferences.fuelEconomyUnit
+            options: [
+              { value: "l100km", label: "L/100km" }, { value: "kml", label: "km/L" },
+              { value: "mpgUS", label: "mpg (US)" }, { value: "mpgUK", label: "mpg (UK)" }
+            ]
+            onSelected: function(v) { convert.setPreference("fuelEconomyUnit", v) }
+          }
+
+          PreferenceChipRow {
+            label: "TIME FORMAT"
+            foreground: root.barForeground
+            value: convert.preferences.timeFormat
+            options: [{ value: "24h", label: "24h" }, { value: "12h", label: "12h" }]
+            onSelected: function(v) { convert.setPreference("timeFormat", v) }
+          }
+
+          PreferenceChipRow {
+            label: "DATA SIZE"
+            foreground: root.barForeground
+            value: convert.preferences.dataSizeUnit
+            options: [{ value: "si", label: "SI (KB/MB)" }, { value: "iec", label: "IEC (KiB/MiB)" }, { value: "both", label: "Both" }]
+            onSelected: function(v) { convert.setPreference("dataSizeUnit", v) }
           }
         }
 

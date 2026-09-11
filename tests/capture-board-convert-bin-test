@@ -1,0 +1,133 @@
+#!/bin/bash
+#
+# Tests the two bash helpers the Convert capability shells out to:
+# capture-board-clipboard-text (read-only clipboard fetch for recognition)
+# and capture-board-copy-text (writes the converted result to the clipboard).
+
+set -uo pipefail
+
+PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+readonly PROJECT_ROOT
+TEST_ROOT=$(/usr/bin/mktemp -d /tmp/capture-board-convert-test.XXXXXXXXXX)
+readonly TEST_ROOT
+readonly FIXTURE_ROOT="$TEST_ROOT/fixture"
+readonly MOCK_BIN="$FIXTURE_ROOT/mock-bin"
+readonly READER="$FIXTURE_ROOT/capture-board-clipboard-text"
+readonly WRITER="$FIXTURE_ROOT/capture-board-copy-text"
+readonly PAYLOAD="$TEST_ROOT/payload"
+readonly COPIED="$TEST_ROOT/copied"
+
+tests_run=0
+
+cleanup() { /usr/bin/rm -rf -- "$TEST_ROOT"; }
+fail() { printf 'not ok %d - %s\n' "$tests_run" "$1" >&2; exit 1; }
+pass() { printf 'ok %d - %s\n' "$tests_run" "$1"; }
+begin_test() {
+  tests_run=$((tests_run + 1))
+  /usr/bin/rm -f -- "$PAYLOAD" "$COPIED"
+  : >"$PAYLOAD"
+  export MOCK_MIME='text/plain;charset=utf-8'
+  export MOCK_LIST_STATUS=0
+}
+
+trap cleanup EXIT
+
+/usr/bin/mkdir -p -- "$MOCK_BIN"
+/usr/bin/cp -- "$PROJECT_ROOT/bin/capture-board-clipboard-text" "$READER"
+/usr/bin/cp -- "$PROJECT_ROOT/bin/capture-board-copy-text" "$WRITER"
+
+cat >"$MOCK_BIN/wl-paste" <<'MOCK'
+#!/bin/bash
+if [[ ${1:-} == '--list-types' ]]; then
+  (( MOCK_LIST_STATUS == 0 )) || exit "$MOCK_LIST_STATUS"
+  [[ -z $MOCK_MIME ]] || printf '%s\n' "$MOCK_MIME"
+  exit 0
+fi
+/usr/bin/cat -- "$MOCK_PAYLOAD"
+MOCK
+
+cat >"$MOCK_BIN/wl-copy" <<'MOCK'
+#!/bin/bash
+/usr/bin/cat >"$MOCK_COPIED"
+MOCK
+
+/usr/bin/chmod 0755 -- "$READER" "$WRITER" "$MOCK_BIN/wl-paste" "$MOCK_BIN/wl-copy"
+/usr/bin/sed -i "s|readonly WL_PASTE=/usr/bin/wl-paste|readonly WL_PASTE=$MOCK_BIN/wl-paste|" "$READER"
+/usr/bin/sed -i "s|readonly WL_COPY=/usr/bin/wl-copy|readonly WL_COPY=$MOCK_BIN/wl-copy|" "$WRITER"
+
+export MOCK_PAYLOAD="$PAYLOAD"
+export MOCK_COPIED="$COPIED"
+
+begin_test
+printf '%s' '72°F' >"$PAYLOAD"
+out=$("$READER")
+[[ $out == '72°F' ]] || fail "clipboard text was not read back exactly (got: $out)"
+pass 'reads plain-text clipboard content'
+
+begin_test
+export MOCK_MIME=''
+export MOCK_LIST_STATUS=1
+out=$("$READER")
+status=$?
+[[ $status -eq 0 ]] || fail 'empty clipboard returned a nonzero exit'
+[[ -z $out ]] || fail 'empty clipboard produced non-empty output'
+pass 'empty clipboard is a silent no-op'
+
+begin_test
+export MOCK_MIME='image/png'
+printf 'not text' >"$PAYLOAD"
+out=$("$READER")
+status=$?
+[[ $status -eq 0 ]] || fail 'non-text clipboard returned a nonzero exit'
+[[ -z $out ]] || fail 'non-text clipboard produced output'
+pass 'non-text clipboard is a silent no-op'
+
+begin_test
+export MOCK_MIME='text/plain;charset=utf-8'
+/usr/bin/head -c 20000 /dev/zero | /usr/bin/tr '\0' A >"$PAYLOAD"
+out=$("$READER")
+[[ ${#out} -le 8192 ]] || fail "output exceeded the 8 KiB analysis cap (got ${#out} bytes)"
+pass 'oversized clipboard content is capped before analysis'
+
+begin_test
+/usr/bin/mv -- "$MOCK_BIN/wl-paste" "$MOCK_BIN/wl-paste.missing"
+out=$("$READER")
+status=$?
+[[ $status -eq 0 ]] || fail 'missing wl-paste returned a nonzero exit'
+[[ -z $out ]] || fail 'missing wl-paste produced output'
+/usr/bin/mv -- "$MOCK_BIN/wl-paste.missing" "$MOCK_BIN/wl-paste"
+pass 'missing wl-paste fails silently, never as an error in the panel'
+
+begin_test
+printf '22.2°C' | "$WRITER"
+[[ -f $COPIED ]] || fail 'copy-text did not invoke wl-copy'
+copied=$(/usr/bin/cat -- "$COPIED")
+[[ $copied == '22.2°C' ]] || fail "copied text did not match (got: $copied)"
+pass 'copies converted text without a trailing newline'
+
+begin_test
+printf '22.2°C\n' | "$WRITER"
+copied=$(/usr/bin/cat -- "$COPIED")
+[[ $copied == '22.2°C' ]] || fail 'copy-text mishandled an already-newline-terminated value'
+pass 'copies converted text that already ends in a newline'
+
+begin_test
+printf '' | "$WRITER"
+[[ ! -e $COPIED ]] || fail 'empty payload should not invoke wl-copy'
+pass 'empty payload does not touch the clipboard'
+
+begin_test
+/usr/bin/mv -- "$MOCK_BIN/wl-copy" "$MOCK_BIN/wl-copy.missing"
+if printf '22.2°C' | "$WRITER"; then
+  fail 'missing wl-copy was accepted'
+fi
+/usr/bin/mv -- "$MOCK_BIN/wl-copy.missing" "$MOCK_BIN/wl-copy"
+pass 'missing wl-copy fails cleanly'
+
+begin_test
+if "$WRITER" extra-argument </dev/null; then
+  fail 'unexpected argument was accepted'
+fi
+pass 'copy-text rejects unexpected arguments'
+
+printf '1..%d\n' "$tests_run"

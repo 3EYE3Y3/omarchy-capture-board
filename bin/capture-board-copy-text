@@ -1,0 +1,21 @@
+#!/bin/bash
+#
+# Sets the system clipboard to a single line of converted-value text read
+# from stdin (the "Copy Result" action). The value comes over stdin, never
+# argv or an environment variable, so a converted amount is never visible in
+# a process listing.
+
+set -u
+
+readonly WL_COPY=/usr/bin/wl-copy
+
+(( $# == 0 )) || exit 2
+[[ -x $WL_COPY ]] || exit 1
+
+# read's exit status reflects whether it saw a trailing newline, not
+# whether it read anything — payload is populated either way, so check its
+# content instead of read's own status.
+IFS= read -r payload
+[[ -n $payload ]] || exit 0
+
+printf '%s' "$payload" | "$WL_COPY"

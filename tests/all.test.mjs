@@ -1,0 +1,6 @@
+import "./parse.test.mjs"
+import "./convert.test.mjs"
+import "./format.test.mjs"
+import "./currency.test.mjs"
+import "./preferences.test.mjs"
+import "./index.test.mjs"
