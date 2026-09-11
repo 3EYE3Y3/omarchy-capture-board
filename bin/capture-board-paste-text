@@ -1,0 +1,52 @@
+#!/bin/bash
+
+set -u
+
+readonly MAX_CLIPBOARD_BYTES=262144
+readonly MKTEMP=/usr/bin/mktemp
+readonly RM=/usr/bin/rm
+readonly HEAD=/usr/bin/head
+readonly STAT=/usr/bin/stat
+readonly ICONV=/usr/bin/iconv
+readonly WTYPE=/usr/bin/wtype
+
+temporary_path=''
+
+(( $# == 0 )) || exit 2
+[[ -x $WTYPE ]] || exit 7
+
+cleanup() {
+  if [[ -n $temporary_path ]]; then
+    "$RM" -f -- "$temporary_path"
+  fi
+}
+
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+umask 077
+
+# Buffer no more than MAX_CLIPBOARD_BYTES + 1 in a securely created file. Open
+# it first, then unlink it before reading clipboard data so the payload is only
+# reachable through this process's protected descriptors and never by a path.
+temporary_path=$($MKTEMP /tmp/capture-board-paste.XXXXXXXXXX) || exit 6
+exec {payload_validation_fd}<"$temporary_path" || exit 6
+exec {payload_type_fd}<"$temporary_path" || exit 6
+exec {payload_write_fd}>"$temporary_path" || exit 6
+"$RM" -f -- "$temporary_path" || exit 6
+temporary_path=''
+
+"$HEAD" -c "$((MAX_CLIPBOARD_BYTES + 1))" >&"$payload_write_fd" || exit 6
+exec {payload_write_fd}>&-
+
+payload_size=$($STAT -Lc %s -- "/proc/$$/fd/$payload_validation_fd") || exit 6
+(( payload_size == 0 )) && exit 3
+(( payload_size <= MAX_CLIPBOARD_BYTES )) || exit 4
+
+# The action only requests an advertised text MIME type. Validate its encoding
+# as a second line of defence before any simulated keystrokes are emitted.
+"$ICONV" -f UTF-8 -t UTF-8 <&"$payload_validation_fd" >/dev/null 2>&1 || exit 5
+
+# The separate typing descriptor remains at byte zero after validation. The
+# literal '-' tells wtype to read text from stdin; clipboard plaintext never
+# becomes a command-line argument or shell variable.
+"$WTYPE" - <&"$payload_type_fd" 2>/dev/null

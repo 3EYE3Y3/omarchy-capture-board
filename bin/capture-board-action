@@ -2,9 +2,129 @@
 
 set -u
 
+readonly WL_PASTE=/usr/bin/wl-paste
+readonly READLINK=/usr/bin/readlink
+readonly NOTIFY_SEND=/usr/bin/notify-send
+
+report_clipboard_error() {
+  local message=$1
+
+  printf 'Capture Board: %s\n' "$message" >&2
+  if [[ -x $NOTIFY_SEND ]]; then
+    "$NOTIFY_SEND" --app-name='Capture Board' 'Plain-text paste failed' "$message" >/dev/null 2>&1 || true
+  fi
+}
+
+resolve_paste_helper() {
+  local script_path script_dir bundled_helper helper_path
+
+  script_path=$($READLINK -f -- "${BASH_SOURCE[0]}") || return 1
+  script_dir=${script_path%/*}
+  bundled_helper="$script_dir/capture-board-paste-text"
+  [[ ! -L $bundled_helper && -f $bundled_helper && -x $bundled_helper ]] || return 1
+  helper_path=$($READLINK -f -- "$bundled_helper") || return 1
+
+  # The helper must be the regular executable shipped beside this script, not
+  # a same-named program (or a symlink target) selected through PATH.
+  [[ $helper_path == "$bundled_helper" ]] || return 1
+  printf '%s\n' "$helper_path"
+}
+
+select_text_mime() {
+  local offered_type types_fd types_pid list_status selected_type='' saw_type=false
+
+  exec {types_fd}< <("$WL_PASTE" --list-types 2>/dev/null)
+  types_pid=$!
+
+  while IFS= read -r offered_type <&"$types_fd"; do
+    saw_type=true
+    case "${offered_type,,}" in
+      text/plain\;charset=utf-8|text/plain\;charset=utf8|text/plain|utf8_string)
+        [[ -n $selected_type ]] || selected_type=$offered_type
+        ;;
+    esac
+  done
+
+  exec {types_fd}<&-
+  wait "$types_pid"
+  list_status=$?
+  if (( list_status != 0 )) && [[ $saw_type == false ]]; then
+    return 3
+  fi
+  (( list_status == 0 )) || return 2
+  [[ -n $selected_type ]] || return 1
+  printf '%s\n' "$selected_type"
+}
+
+paste_plain_text() {
+  local helper_path clipboard_type type_status
+  local -a pipeline_status
+
+  if [[ ! -x $WL_PASTE ]]; then
+    report_clipboard_error 'The trusted clipboard reader /usr/bin/wl-paste is unavailable.'
+    return 1
+  fi
+
+  helper_path=$(resolve_paste_helper) || {
+    report_clipboard_error 'The trusted Capture Board paste helper is unavailable.'
+    return 1
+  }
+
+  clipboard_type=$(select_text_mime)
+  type_status=$?
+  case $type_status in
+    0) ;;
+    1)
+      report_clipboard_error 'The clipboard does not contain plain text.'
+      return 1
+      ;;
+    3) return 0 ;; # No active clipboard selection: preserve the existing no-op.
+    *)
+      report_clipboard_error 'The clipboard could not be read.'
+      return 1
+      ;;
+  esac
+
+  "$WL_PASTE" --no-newline --type "$clipboard_type" 2>/dev/null | "$helper_path"
+  pipeline_status=("${PIPESTATUS[@]}")
+
+  case ${pipeline_status[1]} in
+    0)
+      if (( pipeline_status[0] != 0 )); then
+        report_clipboard_error 'The clipboard could not be read completely.'
+        return 1
+      fi
+      return 0
+      ;;
+    3)
+      if (( pipeline_status[0] != 0 )); then
+        report_clipboard_error 'The clipboard could not be read.'
+        return 1
+      fi
+      return 0 # Preserve the existing no-op for an empty clipboard.
+      ;;
+    4)
+      report_clipboard_error 'Clipboard text is too large to paste (maximum 256 KiB).'
+      return 1
+      ;;
+    5)
+      report_clipboard_error 'The clipboard text is not valid UTF-8.'
+      return 1
+      ;;
+    7)
+      report_clipboard_error 'The trusted keyboard input helper /usr/bin/wtype is unavailable.'
+      return 1
+      ;;
+    *)
+      report_clipboard_error 'The clipboard text could not be pasted.'
+      return 1
+      ;;
+  esac
+}
+
 # Let the keyboard panel release focus before targeting the previously active
 # application or opening a capture overlay.
-sleep 0.15
+/usr/bin/sleep 0.15
 
 send_shortcut() {
   local action=$1
@@ -40,9 +160,7 @@ case "${1:-}" in
     send_shortcut "$1"
     ;;
   paste-plain)
-    clipboard_text=$(wl-paste --type text 2>/dev/null) || exit 0
-    [[ -n $clipboard_text ]] || exit 0
-    omarchy-clipboard-paste-text "$clipboard_text"
+    paste_plain_text
     ;;
   history)
     omarchy-shell shell toggle omarchy.clipboard

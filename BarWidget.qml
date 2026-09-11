@@ -72,7 +72,7 @@ BarWidget {
     function show(): void { root.open() }
     function hide(): void { root.close() }
     function toggle(): void { root.togglePanel() }
-    function version(): string { return "1.1.0" }
+    function version(): string { return "1.1.1" }
   }
 
   BarIconButton {

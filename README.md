@@ -73,6 +73,12 @@ Omarchy installation: `omarchy`, `omarchy-shell`, `hyprctl`, `wl-paste`, and
 
 - The **Share** action uses LocalSend through `omarchy share clipboard`.
 - Screenshot and extraction actions use Omarchy's existing capture commands.
+- Plain-text paste accepts advertised UTF-8 text up to 256 KiB. Clipboard data
+  is passed through protected file descriptors and stdin, never command-line
+  arguments; oversized, non-text, and invalid UTF-8 payloads are rejected.
+- The plain-text paste path calls `/usr/bin/wl-paste` and `/usr/bin/wtype`
+  directly and resolves its bundled helper beside the action script, avoiding
+  executable substitution through `PATH`.
 - The plugin installs no packages, services, hooks, or privileged policies.
 - It requests no elevated permissions and does not overwrite user configuration.
 - Network access occurs only when the user explicitly chooses **Share**.
