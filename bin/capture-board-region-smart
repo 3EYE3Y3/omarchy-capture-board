@@ -1,0 +1,56 @@
+#!/bin/bash
+#
+# Region capture with automatic OCR analysis. This does exactly what the
+# plain region-copy action does — the picked region's image goes to the
+# clipboard, unchanged — and additionally OCRs that same captured image and
+# prints any recognized text to stdout, so the panel can offer conversions
+# for values it finds (a temperature, a speed, a price, ...) without the
+# user separately choosing OCR or Convert.
+#
+# OCR is strictly additional. The clipboard copy happens first and does not
+# wait on it; if OCR is unavailable or finds nothing, this still exits 0 —
+# the region capture already succeeded.
+
+set -u
+
+readonly REGION_PICKER=/usr/bin/omarchy-capture-region
+readonly GRIM=/usr/bin/grim
+readonly WL_COPY=/usr/bin/wl-copy
+readonly TESSERACT=/usr/bin/tesseract
+readonly MKTEMP=/usr/bin/mktemp
+readonly RM=/usr/bin/rm
+
+runtime_dir=${XDG_RUNTIME_DIR:-/tmp}
+tmp_png=""
+freeze_pid=""
+
+cleanup() {
+  [[ -n $freeze_pid ]] && kill "$freeze_pid" 2>/dev/null
+  [[ -n $tmp_png ]] && "$RM" -f -- "$tmp_png"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
+[[ -x $REGION_PICKER && -x $GRIM && -x $WL_COPY ]] || exit 1
+
+selection=""
+{
+  IFS= read -r freeze_pid
+  IFS= read -r selection
+} < <("$REGION_PICKER" region --keep-freeze)
+
+# Selection cancelled (Escape, etc.): unchanged no-op, same as plain
+# region-copy today.
+[[ -n $selection ]] || exit 0
+
+umask 077
+tmp_png=$("$MKTEMP" "$runtime_dir/capture-board-region.XXXXXX.png") || exit 1
+
+"$GRIM" -g "$selection" "$tmp_png" || exit 1
+
+# Primary, expected effect — must not wait on OCR.
+"$WL_COPY" --type image/png <"$tmp_png"
+
+[[ -x $TESSERACT ]] || exit 0
+"$TESSERACT" "$tmp_png" stdout --oem 1 --psm 6 -l "${OMARCHY_OCR_LANGS:-eng}" --dpi 300 -c preserve_interword_spaces=1 2>/dev/null
+exit 0

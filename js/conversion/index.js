@@ -4,6 +4,7 @@
 .import "format.js" as Format
 .import "currency.js" as Currency
 .import "units.js" as Units
+.import "extract.js" as Extract
 
 // The single entry point the panel calls: analyze(text, prefs, options) ->
 // null (nothing recognized/useful) or a ConversionResult:
@@ -439,10 +440,13 @@ function analyzeCompoundCookTime(match, prefs) {
   return { category: "compoundCookTime", source: match.temperature + "°" + match.temperatureUnit.toUpperCase() + " for " + match.duration + " " + match.durationUnit, primary: suggestion(text, text), alternatives: [] }
 }
 
-function analyze(text, prefs, options) {
-  var match = Parse.recognize(text)
+// Turns one parse.js match into a ConversionResult. Shared by analyze()
+// (the single "this whole string is exactly one value" path) and
+// analyzeAll() (the "find every value in this block of text" path) so
+// there is exactly one place that knows how a recognized category becomes
+// a displayed suggestion.
+function dispatch(match, prefs, opts) {
   if (!match) return null
-  var opts = options || {}
   switch (match.category) {
     case "temperature": return analyzeTemperature(match, prefs)
     case "angle": return analyzeAngle(match)
@@ -471,4 +475,45 @@ function analyze(text, prefs, options) {
     case "compoundCookTime": return analyzeCompoundCookTime(match, prefs)
     default: return null
   }
+}
+
+function analyze(text, prefs, options) {
+  var match = Parse.recognize(text)
+  if (!match) return null
+  return dispatch(match, prefs, options || {})
+}
+
+function dedupeKey(match) {
+  return match.category + ":" + String(match.raw).toLowerCase().replace(/\s+/g, " ").trim()
+}
+
+// analyzeAll(text, prefs, options) -> ConversionResult[]
+//
+// Used for anything that might contain *several* values in surrounding
+// text — OCR output above all. It first tries the exact single-value path
+// (unchanged, and still what a plain clipboard capture uses), and only
+// falls back to scanning for embedded values when the whole string isn't
+// itself one value. maxResults caps how many Smart Results a single
+// capture can produce, so a noisy OCR pass stays bounded.
+function analyzeAll(text, prefs, options, maxResults) {
+  var trimmed = String(text === undefined || text === null ? "" : text).trim()
+  if (!trimmed) return []
+  var opts = options || {}
+  var limit = maxResults || 6
+
+  var whole = analyze(trimmed, prefs, opts)
+  if (whole) return [whole]
+
+  var candidates = Extract.extractCandidates(trimmed, limit * 3)
+  var results = []
+  var seen = {}
+  for (var i = 0; i < candidates.length && results.length < limit; i++) {
+    var match = candidates[i]
+    var key = dedupeKey(match)
+    if (seen[key]) continue
+    seen[key] = true
+    var result = dispatch(match, prefs, opts)
+    if (result) results.push(result)
+  }
+  return results
 }

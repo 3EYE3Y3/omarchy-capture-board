@@ -133,6 +133,12 @@ test("currency recognition: codes and symbols", () => {
   assert.ok(ambiguous.candidates.includes("USD"))
 })
 
+test("currency codes are validated against a real ISO list, not any 3 letters", () => {
+  assert.equal(Parse.recognize("149 for"), null)
+  assert.equal(Parse.recognize("12 the"), null)
+  assert.equal(Parse.recognize("42 was"), null)
+})
+
 test("compound expressions", () => {
   assert.equal(Parse.recognize("6 ft x 4 ft").category, "compoundDimensions")
   assert.equal(Parse.recognize("6 ft × 4 ft").category, "compoundDimensions")

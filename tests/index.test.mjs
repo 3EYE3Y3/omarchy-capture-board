@@ -126,3 +126,61 @@ test("recomputation is deterministic: same input and prefs always produce the sa
   const b = analyze("72°F")
   assert.deepEqual(a, b)
 })
+
+function analyzeAll(text, prefs) { return Index.analyzeAll(text, prefs || metric, { rates, now: Date.now() }) }
+
+test("analyzeAll: a sole exact value uses the same single-value path as analyze()", () => {
+  const results = analyzeAll("72°F")
+  assert.equal(results.length, 1)
+  assert.equal(results[0].primary.text, "22.2°C")
+})
+
+test("analyzeAll: OCR-shaped multi-line text yields the worked example from the spec", () => {
+  const results = analyzeAll("Weather today\n72°F\nWind 15 mph")
+  assert.equal(results.length, 2)
+  assert.equal(results[0].primary.text, "22.2°C")
+  assert.equal(results[1].primary.text, "24.1 km/h")
+})
+
+test("analyzeAll: values embedded in ordinary prose are still found", () => {
+  const results = analyzeAll("Outside temperature is 72°F with winds around 15 mph.")
+  assert.equal(results.length, 2)
+})
+
+test("analyzeAll: labelled block with temperature, speed, and mass", () => {
+  const results = analyzeAll("Temperature: 72°F\nSpeed: 65 mph\nWeight: 150 lb")
+  assert.deepEqual(Array.from(results, r => r.category), ["temperature", "speed", "mass"])
+  assert.equal(results[2].primary.text, "68.04 kg")
+})
+
+test("analyzeAll: ordinary text with no convertible values produces nothing", () => {
+  assert.equal(analyzeAll("Just an ordinary sentence with no convertible values in it at all.").length, 0)
+  assert.equal(analyzeAll("").length, 0)
+  assert.equal(analyzeAll("   ").length, 0)
+})
+
+test("analyzeAll: dates, phone numbers, IDs, and version numbers are not misread", () => {
+  const results = analyzeAll("Order #1234567890 shipped on 2024-01-15. Call (555) 123-4567. Version 1.2.3.")
+  assert.equal(results.length, 0)
+})
+
+test("analyzeAll: duplicate values in the same text are only shown once", () => {
+  const results = analyzeAll("72°F this morning, 72°F this afternoon")
+  assert.equal(results.length, 1)
+})
+
+test("analyzeAll: result count is bounded even with many distinct values", () => {
+  const text = "72°F, 65 mph, 150 lb, 100 USD, 2 TB, #7A9E72, 90°, 1 bar, 12 kg, 5 L, 3 hours, 40 psi"
+  const results = analyzeAll(text)
+  assert.ok(results.length <= 6)
+})
+
+test("analyzeAll: currency unavailability does not block other results in the same capture", () => {
+  const results = Index.analyzeAll("72°F and 100 JPY and 65 mph", metric, { rates: null, now: Date.now() })
+  const categories = Array.from(results, r => r.category)
+  assert.ok(categories.includes("temperature"))
+  assert.ok(categories.includes("speed"))
+  assert.ok(categories.includes("currency"))
+  const currencyResult = results.find(r => r.category === "currency")
+  assert.equal(currencyResult.unavailable, true)
+})

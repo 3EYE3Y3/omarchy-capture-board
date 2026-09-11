@@ -1,0 +1,20 @@
+#!/bin/bash
+#
+# Wraps the existing colour-picker toggle (pkill running picker, else start
+# one) so the panel can tell whether a colour was actually picked. hyprpicker
+# writes the hex value straight to the clipboard itself — this never reads
+# or duplicates that value; it only reports success so the panel knows to
+# re-check the clipboard through the existing analyzer.
+
+set -u
+
+readonly HYPRPICKER=/usr/bin/hyprpicker
+readonly PKILL=/usr/bin/pkill
+
+# Already running: this call is the "cancel" press of the toggle. Nothing
+# was picked, so there is nothing new to analyze.
+"$PKILL" -x hyprpicker 2>/dev/null && exit 3
+
+[[ -x $HYPRPICKER ]] || exit 1
+"$HYPRPICKER" -a
+exit $?

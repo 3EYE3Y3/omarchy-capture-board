@@ -13,25 +13,46 @@ Panel {
 
   property var anchorItem: null
   property var hostWidget: null
-  property bool moreActionsVisible: false
+  // "main" | "moreCaptures" | "settings" — swapped in place of the old
+  // ever-growing "More actions" section, so only one view's content ever
+  // counts toward the panel's height at a time.
+  property string activeView: "main"
   readonly property string actionScript: Qt.resolvedUrl("bin/capture-board-action")
     .toString().replace(/^file:\/\//, "")
 
   onOpenedChanged: {
-    if (!opened) {
-      moreActionsVisible = false
-    } else {
-      convert.refresh()
-    }
+    if (!opened) activeView = "main"
+    else convert.refresh()
   }
 
   ConversionService {
     id: convert
+    onCaptureFinished: function(hasResults) { if (hasResults) root.open() }
   }
 
   function launch(action) {
     root.close()
     Quickshell.execDetached([root.actionScript, action])
+  }
+
+  // Region/OCR/colour close the panel the same way every other capture
+  // action does (slurp/hyprpicker need the screen clear of it) but run as
+  // a tracked process instead of a detached one, so ConversionService can
+  // see the result and — via captureFinished above — bring the panel back
+  // once there is something to show.
+  function launchSmartRegion() {
+    root.close()
+    convert.captureRegionSmart()
+  }
+
+  function launchSmartOcr() {
+    root.close()
+    convert.captureOcrSmart()
+  }
+
+  function launchSmartColour() {
+    root.close()
+    convert.pickColourSmart()
   }
 
   function switchPanel(direction) {
@@ -46,9 +67,9 @@ Panel {
     owner: root.hostWidget || root
     bar: root.bar
     open: root.opened
-    focusTarget: copyRegionButton
-    contentWidth: panel.fittedContentWidth(Style.space(430))
-    contentHeight: panel.fittedContentHeight(content.implicitHeight)
+    focusTarget: captureRegionTile
+    contentWidth: panel.fittedContentWidth(Style.space(400))
+    contentHeight: panel.fittedContentHeight(content.implicitHeight, Style.space(520))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -56,363 +77,206 @@ Panel {
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
 
-      ColumnLayout {
-        id: content
-        width: parent.width
-        spacing: Style.space(12)
+      // Bounded and scrollable: on a short/constrained screen
+      // fittedContentHeight caps the panel below content.implicitHeight,
+      // and without this the excess would just be clipped — buttons
+      // silently unreachable rather than merely requiring a scroll.
+      Flickable {
+        id: scrollArea
+        anchors.fill: parent
+        contentWidth: width
+        contentHeight: content.implicitHeight
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        interactive: contentHeight > height
 
-        RowLayout {
-          Layout.fillWidth: true
-          spacing: Style.space(10)
+        ColumnLayout {
+          id: content
+          width: scrollArea.width
+          spacing: Style.space(12)
 
-          Text {
-            text: "󰩬"
-            color: Color.accent
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.displayLarge
+          RowLayout {
+            Layout.fillWidth: true
+            visible: root.activeView === "main"
+            spacing: Style.space(10)
+
+            Text {
+              text: "󰩬"
+              color: Color.accent
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.displayLarge
+            }
+
+            ColumnLayout {
+              Layout.fillWidth: true
+              spacing: 1
+
+              Text {
+                text: "Capture Board"
+                color: root.barForeground
+                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                font.pixelSize: Style.font.title
+                font.bold: true
+              }
+
+              Text {
+                text: "Capture something — useful conversions appear automatically"
+                color: root.barForeground
+                opacity: 0.6
+                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                font.pixelSize: Style.font.caption
+                wrapMode: Text.WordWrap
+              }
+            }
+          }
+
+          SmartResultsSection {
+            Layout.fillWidth: true
+            visible: root.activeView === "main" && (convert.results.length > 0 || convert.analyzing)
+            results: convert.results
+            analyzing: convert.analyzing
+            lastCopiedValue: convert.lastCopiedValue
+            foreground: root.barForeground
+            onCopyRequested: function(text) { convert.copyResult(text) }
           }
 
           ColumnLayout {
             Layout.fillWidth: true
-            spacing: 1
+            visible: root.activeView === "main"
+            spacing: Style.space(10)
 
             Text {
-              text: "Capture region"
+              text: "CAPTURE"
               color: root.barForeground
+              opacity: 0.58
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
-              font.pixelSize: Style.font.title
+              font.pixelSize: Style.font.caption
+              font.letterSpacing: 1.2
               font.bold: true
             }
 
-            Text {
-              text: "Select an area and copy it to the clipboard"
-              color: root.barForeground
-              opacity: 0.65
-              font.family: root.bar ? root.bar.fontFamily : Style.font.family
-              font.pixelSize: Style.font.caption
-            }
-          }
-        }
-
-        Rectangle {
-          Layout.fillWidth: true
-          visible: convert.result !== null
-          implicitHeight: convertCard.implicitHeight + Style.space(20)
-          radius: Math.max(Style.space(5), Style.cornerRadius)
-          color: Style.normalFillFor(root.barForeground, Color.accent, Color.urgent)
-          border.width: Style.normalBorderWidth
-          border.color: Style.normalBorderFor(root.barForeground, Color.accent, Color.urgent)
-
-          ConvertCard {
-            id: convertCard
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.leftMargin: Style.space(12)
-            anchors.rightMargin: Style.space(12)
-            result: convert.result
-            copyConfirmed: convert.copyConfirmed
-            foreground: root.barForeground
-            onCopyRequested: function(text) { convert.copyResult(text) }
-          }
-        }
-
-        ActionButton {
-          id: copyRegionButton
-          Layout.fillWidth: true
-          prominent: true
-          icon: "󰆏"
-          label: "Select region and copy"
-          hint: "Ready to paste immediately"
-          foreground: root.barForeground
-          onTriggered: root.launch("shot-region-copy")
-        }
-
-        RowLayout {
-          Layout.fillWidth: true
-          spacing: Style.space(7)
-
-          ActionButton {
-            Layout.fillWidth: true
-            compact: true
-            icon: "󰏫"
-            label: "Edit region"
-            foreground: root.barForeground
-            onTriggered: root.launch("shot-region-edit")
-          }
-
-          ActionButton {
-            Layout.fillWidth: true
-            compact: true
-            icon: "󰆓"
-            label: "Save region"
-            foreground: root.barForeground
-            onTriggered: root.launch("shot-region-save")
-          }
-        }
-
-        ActionButton {
-          Layout.fillWidth: true
-          compact: true
-          icon: root.moreActionsVisible ? "󰅀" : "󰅂"
-          label: root.moreActionsVisible ? "Fewer actions" : "More actions"
-          hint: "Other capture and clipboard tools"
-          foreground: root.barForeground
-          onTriggered: root.moreActionsVisible = !root.moreActionsVisible
-        }
-
-        ColumnLayout {
-          Layout.fillWidth: true
-          visible: root.moreActionsVisible
-          spacing: Style.space(10)
-
-          Text {
-            text: "OTHER SCREENSHOTS"
-            color: root.barForeground
-            opacity: 0.58
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.caption
-            font.letterSpacing: 1.2
-            font.bold: true
-          }
-
-          GridLayout {
-            Layout.fillWidth: true
-            columns: 4
-            columnSpacing: Style.space(6)
-            rowSpacing: Style.space(6)
-
-            Text { text: "" }
-            Text {
-              text: "EDIT"
-              color: root.barForeground
-              opacity: 0.56
-              font.family: root.bar ? root.bar.fontFamily : Style.font.family
-              font.pixelSize: Style.font.caption
-              font.bold: true
+            RowLayout {
               Layout.fillWidth: true
-              horizontalAlignment: Text.AlignHCenter
-            }
-            Text {
-              text: "COPY"
-              color: root.barForeground
-              opacity: 0.56
-              font.family: root.bar ? root.bar.fontFamily : Style.font.family
-              font.pixelSize: Style.font.caption
-              font.bold: true
-              Layout.fillWidth: true
-              horizontalAlignment: Text.AlignHCenter
-            }
-            Text {
-              text: "SAVE"
-              color: root.barForeground
-              opacity: 0.56
-              font.family: root.bar ? root.bar.fontFamily : Style.font.family
-              font.pixelSize: Style.font.caption
-              font.bold: true
-              Layout.fillWidth: true
-              horizontalAlignment: Text.AlignHCenter
-            }
+              spacing: Style.space(6)
 
-            Repeater {
-              model: [
-                { mode: "smart", label: "Smart", icon: "󰍉" },
-                { mode: "windows", label: "Window", icon: "󰖯" },
-                { mode: "fullscreen", label: "Screen", icon: "󰍹" }
-              ]
+              IconTile {
+                id: captureRegionTile
+                icon: "󰩬"
+                label: "Region"
+                hint: "Select a region, copy it, and detect any convertible values"
+                foreground: root.barForeground
+                onTriggered: root.launchSmartRegion()
+              }
 
-              delegate: RowLayout {
-                id: screenshotRow
-                required property var modelData
-                Layout.columnSpan: 4
-                Layout.fillWidth: true
-                spacing: Style.space(6)
+              IconTile {
+                icon: "󰍹"
+                label: "Screen"
+                hint: "Copy the full screen"
+                foreground: root.barForeground
+                onTriggered: root.launch("shot-fullscreen-copy")
+              }
 
-                Text {
-                  Layout.preferredWidth: Style.space(82)
-                  text: screenshotRow.modelData.icon + "  " + screenshotRow.modelData.label
-                  color: root.barForeground
-                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                  font.pixelSize: Style.font.bodySmall
-                  font.bold: true
-                }
+              IconTile {
+                icon: "󰴑"
+                label: "OCR"
+                hint: "Extract text from a region and detect convertible values"
+                foreground: root.barForeground
+                onTriggered: root.launchSmartOcr()
+              }
 
-                ActionButton {
-                  Layout.fillWidth: true
-                  compact: true
-                  icon: "󰏫"
-                  label: "Edit"
-                  foreground: root.barForeground
-                  onTriggered: root.launch("shot-" + screenshotRow.modelData.mode + "-edit")
-                }
+              IconTile {
+                icon: "󰐲"
+                label: "QR"
+                hint: "Decode a QR code"
+                foreground: root.barForeground
+                onTriggered: root.launch("qr")
+              }
 
-                ActionButton {
-                  Layout.fillWidth: true
-                  compact: true
-                  icon: "󰆏"
-                  label: "Copy"
-                  foreground: root.barForeground
-                  onTriggered: root.launch("shot-" + screenshotRow.modelData.mode + "-copy")
-                }
-
-                ActionButton {
-                  Layout.fillWidth: true
-                  compact: true
-                  icon: "󰆓"
-                  label: "Save"
-                  foreground: root.barForeground
-                  onTriggered: root.launch("shot-" + screenshotRow.modelData.mode + "-save")
-                }
+              IconTile {
+                icon: "󰃉"
+                label: "Colour"
+                hint: "Pick a colour and detect its HEX/RGB/HSL values"
+                foreground: root.barForeground
+                onTriggered: root.launchSmartColour()
               }
             }
-          }
 
-          Text {
-            text: "CLIPBOARD"
-            color: root.barForeground
-            opacity: 0.58
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.caption
-            font.letterSpacing: 1.2
-            font.bold: true
-          }
+            Text {
+              text: "CLIPBOARD"
+              color: root.barForeground
+              opacity: 0.58
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.caption
+              font.letterSpacing: 1.2
+              font.bold: true
+            }
 
-          GridLayout {
-            Layout.fillWidth: true
-            columns: 3
-            columnSpacing: Style.space(7)
-            rowSpacing: Style.space(7)
+            RowLayout {
+              Layout.fillWidth: true
+              spacing: Style.space(6)
 
-            Repeater {
-              model: [
-                { action: "copy", label: "Copy", icon: "󰆏" },
-                { action: "cut", label: "Cut", icon: "󰆐" },
-                { action: "paste", label: "Paste", icon: "󰆒" },
-                { action: "paste-plain", label: "Paste plain", icon: "󰨸" },
-                { action: "history", label: "History", icon: "󰅇" },
-                { action: "share", label: "Share", icon: "󰒗" }
-              ]
+              IconTile {
+                icon: "󰆏"
+                label: "Copy"
+                foreground: root.barForeground
+                onTriggered: root.launch("copy")
+              }
 
-              delegate: ActionButton {
-                required property var modelData
+              IconTile {
+                icon: "󰆐"
+                label: "Cut"
+                foreground: root.barForeground
+                onTriggered: root.launch("cut")
+              }
+
+              IconTile {
+                icon: "󰆒"
+                label: "Paste"
+                foreground: root.barForeground
+                onTriggered: root.launch("paste")
+              }
+            }
+
+            RowLayout {
+              Layout.fillWidth: true
+              spacing: Style.space(6)
+
+              ActionButton {
                 Layout.fillWidth: true
                 compact: true
-                icon: modelData.icon
-                label: modelData.label
+                icon: "󰅂"
+                label: "More captures"
                 foreground: root.barForeground
-                onTriggered: root.launch(modelData.action)
+                onTriggered: root.activeView = "moreCaptures"
               }
-            }
-          }
 
-          Text {
-            text: "EXTRACT"
-            color: root.barForeground
-            opacity: 0.58
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.caption
-            font.letterSpacing: 1.2
-            font.bold: true
-          }
-
-          RowLayout {
-            Layout.fillWidth: true
-            spacing: Style.space(7)
-
-            Repeater {
-              model: [
-                { action: "ocr", label: "Text", icon: "󰴑" },
-                { action: "qr", label: "QR code", icon: "󰐲" },
-                { action: "colour", label: "Colour", icon: "󰃉" }
-              ]
-
-              delegate: ActionButton {
-                required property var modelData
+              ActionButton {
                 Layout.fillWidth: true
                 compact: true
-                icon: modelData.icon
-                label: modelData.label
+                icon: "󰒓"
+                label: "Settings"
                 foreground: root.barForeground
-                onTriggered: root.launch(modelData.action)
+                onTriggered: root.activeView = "settings"
               }
             }
           }
 
-          Text {
-            text: "CONVERT PREFERENCES"
-            color: root.barForeground
-            opacity: 0.58
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.caption
-            font.letterSpacing: 1.2
-            font.bold: true
-          }
-
-          PreferenceChipRow {
-            label: "MEASUREMENT SYSTEM"
+          MoreCapturesView {
+            Layout.fillWidth: true
+            visible: root.activeView === "moreCaptures"
             foreground: root.barForeground
-            value: convert.preferences.measurementSystem
-            options: [{ value: "metric", label: "Metric" }, { value: "imperial", label: "Imperial" }]
-            onSelected: function(v) { convert.setPreference("measurementSystem", v) }
+            onActionRequested: function(action) { root.launch(action) }
+            onBackRequested: root.activeView = "main"
           }
 
-          PreferenceChipRow {
-            label: "TEMPERATURE"
+          SettingsView {
+            Layout.fillWidth: true
+            visible: root.activeView === "settings"
             foreground: root.barForeground
-            value: convert.preferences.temperatureUnit
-            options: [{ value: "c", label: "°C" }, { value: "f", label: "°F" }]
-            onSelected: function(v) { convert.setPreference("temperatureUnit", v) }
+            preferences: convert.preferences
+            onPreferenceChanged: function(key, value) { convert.setPreference(key, value) }
+            onBackRequested: root.activeView = "main"
           }
-
-          PreferenceChipRow {
-            label: "CURRENCY"
-            foreground: root.barForeground
-            value: convert.preferences.currency
-            options: [
-              { value: "USD", label: "USD" }, { value: "EUR", label: "EUR" }, { value: "GBP", label: "GBP" },
-              { value: "AUD", label: "AUD" }, { value: "CAD", label: "CAD" }, { value: "NZD", label: "NZD" },
-              { value: "JPY", label: "JPY" }, { value: "CNY", label: "CNY" }, { value: "INR", label: "INR" },
-              { value: "CHF", label: "CHF" }, { value: "SGD", label: "SGD" }, { value: "HKD", label: "HKD" }
-            ]
-            onSelected: function(v) { convert.setPreference("currency", v) }
-          }
-
-          PreferenceChipRow {
-            label: "FUEL ECONOMY"
-            foreground: root.barForeground
-            value: convert.preferences.fuelEconomyUnit
-            options: [
-              { value: "l100km", label: "L/100km" }, { value: "kml", label: "km/L" },
-              { value: "mpgUS", label: "mpg (US)" }, { value: "mpgUK", label: "mpg (UK)" }
-            ]
-            onSelected: function(v) { convert.setPreference("fuelEconomyUnit", v) }
-          }
-
-          PreferenceChipRow {
-            label: "TIME FORMAT"
-            foreground: root.barForeground
-            value: convert.preferences.timeFormat
-            options: [{ value: "24h", label: "24h" }, { value: "12h", label: "12h" }]
-            onSelected: function(v) { convert.setPreference("timeFormat", v) }
-          }
-
-          PreferenceChipRow {
-            label: "DATA SIZE"
-            foreground: root.barForeground
-            value: convert.preferences.dataSizeUnit
-            options: [{ value: "si", label: "SI (KB/MB)" }, { value: "iec", label: "IEC (KiB/MiB)" }, { value: "both", label: "Both" }]
-            onSelected: function(v) { convert.setPreference("dataSizeUnit", v) }
-          }
-        }
-
-        Text {
-          Layout.fillWidth: true
-          text: "Left-click the bar icon anytime for instant region copy"
-          color: root.barForeground
-          opacity: 0.5
-          font.family: root.bar ? root.bar.fontFamily : Style.font.family
-          font.pixelSize: Style.font.caption
-          horizontalAlignment: Text.AlignHCenter
         }
       }
     }

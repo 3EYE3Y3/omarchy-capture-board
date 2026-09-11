@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.3eye3y3.capture-board",
   "name": "Capture Board",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "author": "3EYE3Y3",
   "license": "MIT",
   "description": "One-click region screenshots, clipboard tools, and automatic unit/currency conversion.",

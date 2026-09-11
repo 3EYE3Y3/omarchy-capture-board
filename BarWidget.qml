@@ -28,9 +28,19 @@ BarWidget {
     if (panelLoader.item) panelLoader.item.toggle()
   }
 
+  // Routed through the panel's smart-capture pipeline (region copy, then
+  // OCR, then convertible-value detection) rather than a detached process,
+  // so a one-click region capture from the bar can still bring the panel
+  // back with Smart Results when it finds something — the same as
+  // capturing from inside the panel. Falls back to a plain detached copy
+  // only if the panel component hasn't loaded yet.
   function copyRegion() {
     close()
-    Quickshell.execDetached([actionScript, "shot-region-copy"])
+    if (panelLoader.item && typeof panelLoader.item.launchSmartRegion === "function") {
+      panelLoader.item.launchSmartRegion()
+    } else {
+      Quickshell.execDetached([actionScript, "shot-region-copy"])
+    }
   }
 
   function closeForPopoutSwitch() {
@@ -72,7 +82,7 @@ BarWidget {
     function show(): void { root.open() }
     function hide(): void { root.close() }
     function toggle(): void { root.togglePanel() }
-    function version(): string { return "1.2.0" }
+    function version(): string { return "1.3.0" }
   }
 
   BarIconButton {

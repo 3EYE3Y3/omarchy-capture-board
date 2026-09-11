@@ -329,11 +329,24 @@ var CURRENCY_SYMBOLS = {
   "A$": { confident: "AUD" }, "C$": { confident: "CAD" }, "NZ$": { confident: "NZD" }
 }
 
+// A curated set of real ISO 4217 codes, not "any 3 letters" — a bare regex
+// would treat ordinary words next to a number ("149 for", "12 the") as a
+// currency code, which is harmless for a single deliberately-copied
+// clipboard value but a serious false-positive risk once currency
+// recognition also runs against free-form OCR/prose text.
+var CURRENCY_CODES = {
+  USD: 1, EUR: 1, GBP: 1, JPY: 1, CNY: 1, AUD: 1, CAD: 1, NZD: 1, CHF: 1, INR: 1,
+  SGD: 1, HKD: 1, KRW: 1, MXN: 1, BRL: 1, ZAR: 1, SEK: 1, NOK: 1, DKK: 1, PLN: 1,
+  THB: 1, IDR: 1, MYR: 1, PHP: 1, VND: 1, TRY: 1, RUB: 1, AED: 1, SAR: 1, ILS: 1,
+  EGP: 1, NGN: 1, ARS: 1, CLP: 1, COP: 1, PEN: 1, TWD: 1, CZK: 1, HUF: 1, RON: 1,
+  ISK: 1, PKR: 1, BDT: 1, LKR: 1, KES: 1, GHS: 1, MAD: 1, QAR: 1, KWD: 1, BHD: 1, OMR: 1, JOD: 1
+}
+
 function parseCurrency(text) {
   var m = new RegExp("^([A-Za-z]{3})\\s*(" + UNUM.replace("\\d", "[\\d,]") + ")$").exec(text)
-  if (m) return { category: "currency", value: toNumber(m[2]), currency: m[1].toUpperCase(), confidence: "high" }
+  if (m && CURRENCY_CODES[m[1].toUpperCase()]) return { category: "currency", value: toNumber(m[2]), currency: m[1].toUpperCase(), confidence: "high" }
   m = new RegExp("^(" + UNUM.replace("\\d", "[\\d,]") + ")\\s*([A-Za-z]{3})$").exec(text)
-  if (m) return { category: "currency", value: toNumber(m[1]), currency: m[2].toUpperCase(), confidence: "high" }
+  if (m && CURRENCY_CODES[m[2].toUpperCase()]) return { category: "currency", value: toNumber(m[1]), currency: m[2].toUpperCase(), confidence: "high" }
   m = new RegExp("^(A\\$|C\\$|NZ\\$|[$£€¥₹])\\s*(" + UNUM.replace("\\d", "[\\d,]") + ")$").exec(text)
   if (m) {
     var info = CURRENCY_SYMBOLS[m[1]]

@@ -1,0 +1,40 @@
+#!/bin/bash
+#
+# The explicit OCR action, feeding the same Smart Result pipeline as region
+# capture. Behaviour matches Omarchy's own "capture text" action (region
+# select, OCR, copy the recognized text, notify) exactly — this additionally
+# prints the recognized text to stdout so the panel can offer conversions,
+# reusing the same analyzer rather than a second OCR/Convert path.
+
+set -u
+
+readonly HYPRPICKER=/usr/bin/hyprpicker
+readonly SLURP=/usr/bin/slurp
+readonly GRIM=/usr/bin/grim
+readonly TESSERACT=/usr/bin/tesseract
+readonly WL_COPY=/usr/bin/wl-copy
+readonly NOTIFY_SEND=/usr/bin/omarchy-notification-send
+
+freeze_pid=""
+cleanup() { [[ -n $freeze_pid ]] && kill "$freeze_pid" 2>/dev/null; }
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
+[[ -x $SLURP && -x $GRIM && -x $TESSERACT && -x $WL_COPY ]] || exit 1
+
+if [[ -x $HYPRPICKER ]]; then
+  "$HYPRPICKER" -r -z >/dev/null 2>&1 &
+  freeze_pid=$!
+  sleep 0.1
+fi
+
+selection=$("$SLURP" 2>/dev/null)
+[[ -n $selection ]] || exit 0
+
+text=$("$GRIM" -g "$selection" - | "$TESSERACT" stdin stdout --oem 1 --psm 6 -l "${OMARCHY_OCR_LANGS:-eng}" --dpi 300 -c preserve_interword_spaces=1 2>/dev/null)
+[[ -n $text ]] || exit 0
+
+printf '%s' "$text" | "$WL_COPY"
+[[ -x $NOTIFY_SEND ]] && "$NOTIFY_SEND" --app-name='Capture Board' -g 󰴑 "Copied text from selection to clipboard" >/dev/null 2>&1
+
+printf '%s' "$text"
