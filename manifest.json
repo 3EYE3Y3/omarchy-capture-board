@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.3eye3y3.capture-board",
+  "name": "Capture Board",
+  "version": "1.1.0",
+  "author": "3EYE3Y3",
+  "license": "MIT",
+  "description": "One-click region screenshots with secondary capture and clipboard tools.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Capture Board",
+    "description": "Left-click to copy a selected region; right-click for more capture tools.",
+    "category": "Utilities",
+    "defaultSection": "left",
+    "allowMultiple": false
+  }
+}

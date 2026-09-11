@@ -1,0 +1,74 @@
+#!/bin/bash
+
+set -u
+
+# Let the keyboard panel release focus before targeting the previously active
+# application or opening a capture overlay.
+sleep 0.15
+
+send_shortcut() {
+  local action=$1
+
+  hyprctl eval "
+    local action = '$action'
+    local terminal = false
+    local window = hl.get_active_window()
+    if window then
+      for _, tag in ipairs(window.tags or {}) do
+        if tag:gsub('%*$', '') == 'terminal' then terminal = true end
+      end
+    end
+
+    local mods, key
+    if action == 'copy' then
+      mods, key = terminal and 'CTRL' or 'CTRL', terminal and 'Insert' or 'C'
+    elseif action == 'paste' then
+      mods, key = terminal and 'SHIFT' or 'CTRL', terminal and 'Insert' or 'V'
+    else
+      mods, key = 'CTRL', 'X'
+    end
+
+    hl.dispatch(hl.dsp.send_key_state({ mods = mods, key = key, state = 'down' }))
+    hl.timer(function()
+      hl.dispatch(hl.dsp.send_key_state({ mods = mods, key = key, state = 'up' }))
+    end, { timeout = 50, type = 'oneshot' })
+  " >/dev/null
+}
+
+case "${1:-}" in
+  copy|cut|paste)
+    send_shortcut "$1"
+    ;;
+  paste-plain)
+    clipboard_text=$(wl-paste --type text 2>/dev/null) || exit 0
+    [[ -n $clipboard_text ]] || exit 0
+    omarchy-clipboard-paste-text "$clipboard_text"
+    ;;
+  history)
+    omarchy-shell shell toggle omarchy.clipboard
+    ;;
+  share)
+    omarchy share clipboard
+    ;;
+  shot-smart-edit|shot-smart-copy|shot-smart-save|\
+  shot-region-edit|shot-region-copy|shot-region-save|\
+  shot-windows-edit|shot-windows-copy|shot-windows-save|\
+  shot-fullscreen-edit|shot-fullscreen-copy|shot-fullscreen-save)
+    IFS=- read -r _ mode outcome <<<"$1"
+    [[ $outcome == edit ]] && outcome=slurp
+    omarchy capture screenshot "$mode" "$outcome"
+    ;;
+  ocr)
+    omarchy capture text
+    ;;
+  qr)
+    omarchy capture qr
+    ;;
+  colour)
+    pkill hyprpicker 2>/dev/null || hyprpicker -a
+    ;;
+  *)
+    printf 'Unknown Capture Board action: %s\n' "${1:-}" >&2
+    exit 2
+    ;;
+esac
